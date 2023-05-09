@@ -472,18 +472,17 @@ Clone the project:
     git clone https://github.com/mosquito/aio-pika.git
     cd aio-pika
 
-Create a new virtualenv for `aio-pika`_:
+Create a new virtualenv for `aio-pika`_ and install all requirements:
 
 .. code-block:: shell
 
-    python3 -m venv env
-    source env/bin/activate
+    poetry install --sync --with dev
 
 Install all requirements for `aio-pika`_:
 
 .. code-block:: shell
 
-    pip install -e '.[develop]'
+    poetry install --sync --with dev --with uvloop
 
 
 Running Tests
