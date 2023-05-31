@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Software Development",
     "Typing :: Typed",
 ]
-packages = [{ include = "aio_pika" }]
+packages = [{ include = "src/aio_pika" }]
 
 [tool.poetry.urls]
 "Source" = "https://github.com/mosquito/aio-pika"
@@ -83,7 +83,7 @@ warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = true
 files = [
-    "aio_pika",
+    "src/aio_pika",
     "tests",
     "docs/source/examples",
     "docs/source/rabbitmq-tutorial/examples/1-introduction",
