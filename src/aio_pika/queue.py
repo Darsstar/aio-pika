@@ -9,7 +9,7 @@ from aiormq.abc import DeliveredMessage
 from pamqp.common import Arguments
 
 from .abc import (
-    AbstractChannel, AbstractIncomingMessage, AbstractQueue,
+    AbstractIncomingMessage, AbstractQueue,
     AbstractQueueIterator, ConsumerTag, TimeoutType, get_exchange_name,
 )
 from .exceptions import QueueEmpty
@@ -18,6 +18,9 @@ from .log import get_logger
 from .message import IncomingMessage
 from .tools import CallbackCollection, create_task, ensure_awaitable
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .channel import Channel
 
 if sys.version_info >= (3, 8):
     from typing import Literal
@@ -56,7 +59,7 @@ class Queue(AbstractQueue):
 
     def __init__(
         self,
-        channel: AbstractChannel,
+        channel: "Channel",
         name: Optional[str],
         durable: bool,
         exclusive: bool,
@@ -421,7 +424,7 @@ class QueueIterator(AbstractQueueIterator):
     def consumer_tag(self) -> Optional[ConsumerTag]:
         return getattr(self, "_consumer_tag", None)
 
-    async def close(self, *_: Any) -> Any:
+    async def close(self, *_: Any) -> None:
         log.debug("Cancelling queue iterator %r", self)
 
         await self._closed.wait()
@@ -483,7 +486,7 @@ class QueueIterator(AbstractQueueIterator):
 
     def __init__(self, queue: Queue, **kwargs: Any):
         self._consumer_tag: ConsumerTag
-        self._amqp_queue: AbstractQueue = queue
+        self._amqp_queue: Queue = queue
         self._queue = asyncio.Queue()
         self._consume_kwargs = kwargs
         self._closed = asyncio.Event()

@@ -151,6 +151,20 @@ class RobustQueue(Queue, AbstractRobustQueue):
 
 
 class RobustQueueIterator(QueueIterator):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        inherited = self.close
+
+        async def close(*args, **kwargs) -> None:
+            if not self._amqp_queue.channel._closed:
+                return
+
+            await inherited(*args, **kwargs)
+
+        setattr(self, "close", close)
+
     async def consume(self) -> None:
         while True:
             try:
