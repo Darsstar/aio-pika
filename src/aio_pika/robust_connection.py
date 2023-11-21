@@ -111,10 +111,11 @@ class RobustConnection(Connection, AbstractRobustConnection):
             closing = self.loop.create_future()
             closing.set_exception(e)
             await self.close_callbacks(closing)
-            await asyncio.gather(
+            values = await asyncio.gather(
                 transport.connection.close(e),
                 return_exceptions=True,
             )
+            pass
             raise
 
         if self.connection_attempt:
@@ -144,6 +145,8 @@ class RobustConnection(Connection, AbstractRobustConnection):
                     self.__fail_fast_future.set_result(None)
 
                 log.debug("Connection made on %r", self)
+
+                continue
             except CONNECTION_EXCEPTIONS as e:
                 if not self.__fail_fast_future.done():
                     self.__fail_fast_future.set_exception(e)

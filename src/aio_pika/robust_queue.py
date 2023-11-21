@@ -1,19 +1,21 @@
 import uuid
 import warnings
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 import aiormq
 from aiormq import ChannelInvalidStateError
 from pamqp.common import Arguments
 
 from .abc import (
-    AbstractChannel, AbstractExchange, AbstractIncomingMessage,
+    AbstractExchange, AbstractIncomingMessage,
     AbstractQueueIterator, AbstractRobustQueue, ConsumerTag, TimeoutType,
 )
 from .exchange import ExchangeParamType
 from .log import get_logger
 from .queue import Queue, QueueIterator
 
+if TYPE_CHECKING:
+    from .channel import Channel
 
 log = get_logger(__name__)
 
@@ -26,7 +28,7 @@ class RobustQueue(Queue, AbstractRobustQueue):
 
     def __init__(
         self,
-        channel: AbstractChannel,
+        channel: "Channel",
         name: Optional[str],
         durable: bool = False,
         exclusive: bool = False,
@@ -152,18 +154,11 @@ class RobustQueue(Queue, AbstractRobustQueue):
 
 class RobustQueueIterator(QueueIterator):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    async def _on_channel_close(self) -> None:
+        if not self._amqp_queue.channel._closed:
+            return
 
-        inherited = self.close
-
-        async def close(*args, **kwargs) -> None:
-            if not self._amqp_queue.channel._closed:
-                return
-
-            await inherited(*args, **kwargs)
-
-        setattr(self, "close", close)
+        await super()._on_channel_close()
 
     async def consume(self) -> None:
         while True:

@@ -1,10 +1,12 @@
 import asyncio
 import sys
+from contextlib import suppress
 from functools import partial
 from types import TracebackType
 from typing import Any, Awaitable, Callable, Optional, Type, overload
 
 import aiormq
+from aiormq import ConnectionClosed
 from aiormq.abc import DeliveredMessage
 from pamqp.common import Arguments
 
@@ -76,6 +78,8 @@ class Queue(AbstractQueue):
         self.auto_delete = auto_delete
         self.arguments = arguments
         self.passive = passive
+
+        self.channel.close_callbacks.add(self.close_callbacks)
 
     def __str__(self) -> str:
         return f"{self.name}"
@@ -192,6 +196,7 @@ class Queue(AbstractQueue):
             arguments,
         )
 
+        self.channel.close_callbacks.discard(self.close_callbacks)
         channel = await self.channel.get_underlay_channel()
         return await channel.queue_unbind(
             queue=self.name,
@@ -281,6 +286,7 @@ class Queue(AbstractQueue):
         :return: Basic.CancelOk when operation completed successfully
         """
 
+        self.channel.close_callbacks.discard(self.close_callbacks)
         channel = await self.channel.get_underlay_channel()
         return await channel.basic_cancel(
             consumer_tag=consumer_tag, nowait=nowait, timeout=timeout,
@@ -424,14 +430,17 @@ class QueueIterator(AbstractQueueIterator):
     def consumer_tag(self) -> Optional[ConsumerTag]:
         return getattr(self, "_consumer_tag", None)
 
+    async def _on_channel_close(self) -> None:
+        await self.close()
+
     async def close(self, *_: Any) -> None:
         log.debug("Cancelling queue iterator %r", self)
-
-        await self._closed.wait()
 
         if not hasattr(self, "_consumer_tag"):
             log.debug("Queue iterator %r already cancelled", self)
             return
+
+        self._closed.set()
 
         if self._amqp_queue.channel.is_closed:
             log.debug("Queue iterator %r channel closed", self)
@@ -442,7 +451,9 @@ class QueueIterator(AbstractQueueIterator):
         del self._consumer_tag
 
         self._amqp_queue.close_callbacks.remove(self.close)
-        await self._amqp_queue.cancel(consumer_tag)
+
+        with suppress(ConnectionClosed):
+            await self._amqp_queue.cancel(consumer_tag)
 
         log.debug("Queue iterator %r closed", self)
 
@@ -456,23 +467,23 @@ class QueueIterator(AbstractQueueIterator):
             if msg is None:
                 return
 
-            if self._amqp_queue.channel.is_closed:
-                log.warning(
-                    "Message %r lost when queue iterator %r channel closed",
-                    msg,
-                    self,
-                )
-                return
+        if self._amqp_queue.channel.is_closed:
+            log.warning(
+                "Message %r lost when queue iterator %r channel closed",
+                msg,
+                self,
+            )
+            return
 
-            if self._consume_kwargs.get("no_ack", False):
-                log.warning(
-                    "Message %r lost for consumer with no_ack %r",
-                    msg,
-                    self,
-                )
-                return
+        if self._consume_kwargs.get("no_ack", False):
+            log.warning(
+                "Message %r lost for consumer with no_ack %r",
+                msg,
+                self,
+            )
+            return
 
-            await msg.nack(requeue=True, multiple=True)
+        await msg.nack(requeue=True, multiple=True)
 
     def __str__(self) -> str:
         return f"queue[{self._amqp_queue}](...)"
@@ -490,14 +501,7 @@ class QueueIterator(AbstractQueueIterator):
         self._queue = asyncio.Queue()
         self._consume_kwargs = kwargs
         self._closed = asyncio.Event()
-        self.close_task = asyncio.create_task(self.close())
 
-        async def close(*args, **kwargs) -> None:
-            self._closed.set()
-
-            await self.close_task
-
-        setattr(self, "close", close)
         self._amqp_queue.close_callbacks.add(self.close)
 
     async def on_message(self, message: AbstractIncomingMessage) -> None:

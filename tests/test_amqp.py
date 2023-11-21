@@ -1298,7 +1298,7 @@ class TestCaseAmqp(TestCaseAmqpBase):
 
         data = list()
 
-        await asyncio.gather(p, c, asr)
+        await asyncio.gather(p, c, asr, return_exceptions=True)
 
         assert data == list(map(lambda x: str(x).encode(), range(messages.maxsize)))
 
