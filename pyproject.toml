@@ -36,7 +36,7 @@ packages = [{ include = "aio_pika" }]
 "Documentation" = "https://aio-pika.readthedocs.org/"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.8"
 aiormq = "~6.7.7"
 yarl = [{ version = '*'}]
 typing_extensions = [{ version = '*', python = "< 3.8" }]
@@ -44,7 +44,7 @@ typing_extensions = [{ version = '*', python = "< 3.8" }]
 setuptools = [{ version = '*', python = "< 3.8" }]
 
 [tool.poetry.group.dev.dependencies]
-aiomisc = "^17.2"
+aiomisc = "^17.3.41"
 aiomisc-pytest = "^1.1.1"
 collective-checkdocs = "^0.2"
 coverage = "^6.5.0"
