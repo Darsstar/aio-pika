@@ -689,5 +689,6 @@ async def test_channel_reconnect_stairway(
 
         assert messages
 
+    assert on_reconnect.is_set()
     await connection.close()
     await direct_connection.close()

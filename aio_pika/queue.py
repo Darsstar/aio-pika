@@ -2,7 +2,7 @@ import asyncio
 import sys
 from functools import partial
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Optional, Type, overload
+from typing import Any, Awaitable, Callable, Optional, Set, Type, overload
 
 import aiormq
 from aiormq.abc import DeliveredMessage
@@ -421,7 +421,22 @@ class QueueIterator(AbstractQueueIterator):
     def consumer_tag(self) -> Optional[ConsumerTag]:
         return getattr(self, "_consumer_tag", None)
 
-    async def close(self, *_: Any) -> Any:
+    async def close(self) -> None:
+        await self._on_close(self._amqp_queue.channel, None)
+        self._closed.set()
+
+    async def _set_closed_callback(
+        self,
+        _channel: AbstractChannel,
+        exc: Optional[BaseException]
+    ) -> None:
+        self._closed.set()
+
+    async def _on_close(
+        self,
+        _channel: AbstractChannel,
+        _exc: Optional[BaseException]
+    ) -> None:
         log.debug("Cancelling queue iterator %r", self)
 
         if not hasattr(self, "_consumer_tag"):
@@ -436,7 +451,7 @@ class QueueIterator(AbstractQueueIterator):
         consumer_tag = self._consumer_tag
         del self._consumer_tag
 
-        self._amqp_queue.close_callbacks.remove(self.close)
+        self._amqp_queue.close_callbacks.discard(self._on_close)
         await self._amqp_queue.cancel(consumer_tag)
 
         log.debug("Queue iterator %r closed", self)
@@ -482,9 +497,14 @@ class QueueIterator(AbstractQueueIterator):
         self._consumer_tag: ConsumerTag
         self._amqp_queue: AbstractQueue = queue
         self._queue = asyncio.Queue()
+        self._closed = asyncio.Event()
         self._consume_kwargs = kwargs
 
-        self._amqp_queue.close_callbacks.add(self.close)
+        self._amqp_queue.close_callbacks.add(self._on_close, weak=True)
+        self._amqp_queue.close_callbacks.add(
+            self._set_closed_callback,
+            weak=True
+        )
 
     async def on_message(self, message: AbstractIncomingMessage) -> None:
         await self._queue.put(message)
@@ -513,22 +533,61 @@ class QueueIterator(AbstractQueueIterator):
     async def __anext__(self) -> IncomingMessage:
         if not hasattr(self, "_consumer_tag"):
             await self.consume()
+
+        if self._closed.is_set():
+            raise StopAsyncIteration
+
+        message = asyncio.create_task(
+            self._queue.get(),
+            name=f"waiting for message from {self}"
+        )
+        closed_channel = asyncio.create_task(
+            self._amqp_queue.channel.wait(),
+            name=f"waiting for channel {self._amqp_queue.channel} to close "
+                 f"before a message from {self}"
+        )
+        closed = asyncio.create_task(
+            self._closed.wait(),
+            name=f"waiting for queue iterator to close "
+                 f"before a message from {self}"
+        )
+
+        timeout = self._consume_kwargs.get("timeout")
+
+        done: Set[asyncio.Task] = set()
+        pending = {message, closed_channel, closed}
+
         try:
-            return await asyncio.wait_for(
-                self._queue.get(),
-                timeout=self._consume_kwargs.get("timeout"),
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED, timeout=timeout
             )
+            cancelled = False
         except asyncio.CancelledError:
-            timeout = self._consume_kwargs.get(
-                "timeout",
-                self.DEFAULT_CLOSE_TIMEOUT,
-            )
+            cancelled = True
+
+        for task in pending:
+            task.cancel()
+
+        await asyncio.wait(pending)
+
+        if not done and not cancelled:
+            if timeout is None:
+                timeout = self.DEFAULT_CLOSE_TIMEOUT
             log.info(
                 "%r closing with timeout %d seconds",
                 self, timeout,
             )
             await asyncio.wait_for(self.close(), timeout=timeout)
-            raise
+            raise TimeoutError
+
+        if not message.cancelled():
+            return message.result()
+
+        if not closed.cancelled() or not closed_channel.cancelled():
+            self._closed.set()
+            raise StopAsyncIteration
+
+        raise asyncio.CancelledError
 
 
 __all__ = ("Queue", "QueueIterator", "ConsumerTag")
