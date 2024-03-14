@@ -603,7 +603,8 @@ class BadNetwork:
         return chunk
 
 
-DISCONNECT_OFFSETS = [2 << i for i in range(5, 12)]
+# DISCONNECT_OFFSETS = [2 << i for i in range(5, 12)]
+DISCONNECT_OFFSETS = range(60, 4096)
 STAIR_STEPS = list(itertools.product([0.1, 0.0], DISCONNECT_OFFSETS))
 STAIR_STEPS_IDS = [
     f"[{i // len(DISCONNECT_OFFSETS)}] {t}-{s}"
